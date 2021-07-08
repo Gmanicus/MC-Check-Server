@@ -5,13 +5,32 @@ import multiprocessing
 import os
 from mcstatus import MinecraftServer
 import requests
+import socket
 import json
 from dotenv import load_dotenv
 
 load_dotenv()
 
+HOST = '127.0.0.1'  # Standard loopback interface address (localhost)
+PORT = 10230        # Port to listen on (non-privileged ports are > 1023)
+
 CHECK_INTERVAL = 5
 DOWN_DELAY = 60
+
+class User:
+    def __init__(self, name, session):
+        self.name = name
+        self.session = session
+
+class Session:
+    def __init__(self, author, start_time):
+        self.id = time.time()
+        self.author = author
+        self.start_time = start_time
+        self.end_time = None
+
+activeSessions = []
+
 
 def main():
     server = MinecraftServer(os.getenv("MC_CHECKSERVER_IP"), 10240)
@@ -22,7 +41,6 @@ def main():
 
     downTime = 0
     previousUsers = []
-    sessions = []
 
     while (True):
         if (int(time.time() % CHECK_INTERVAL) == 0):
@@ -51,7 +69,7 @@ def main():
 
                 # if user is not in previous users
                 # add them to previous users with new session
-                # add new session to sessions
+                # add new session to activeSessions
 
                 if (status.players.sample):
                     for player in status.players.sample:
@@ -67,7 +85,7 @@ def main():
                             newUser = User(player.name, newSession)
                             newSession.author = newUser
 
-                            sessions.append(newSession)
+                            activeSessions.append(newSession)
                             previousUsers.append(newUser)
 
             # LOST A USER
@@ -86,9 +104,10 @@ def main():
                                 break
                     if not found:
                         print("CLOSED SESSION: " + player.name)
-                        # End session, remove user from previous users
+                        # End session, remove user from previous users, remove session from active activeSessions
                         user.session.end_time = datetime.datetime.now()
                         saveSession(user.session)
+                        activeSessions.remove(user.session)
                         previousUsers.remove(user)
                         break
             
@@ -96,6 +115,7 @@ def main():
             #     for player in status.players.sample:
             #         print("> {}".format(player.name))
         time.sleep(1)
+
 
 def saveSession(session):
         #if (DEBUG): return
@@ -116,17 +136,31 @@ def saveSession(session):
         store[session.id] = serializable_data
         json.dump(store, file, indent=4)
 
-class User:
-    def __init__(self, name, session):
-        self.name = name
-        self.session = session
 
-class Session:
-    def __init__(self, author, start_time):
-        self.id = time.time()
-        self.author = author
-        self.start_time = start_time
-        self.end_time = None
+def runListener():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind((HOST, PORT))
+        s.listen()
+        conn, addr = s.accept()
+        with conn:
+            print('Connected by', addr)
+            store = bytes(str(getAllSessions()), "utf-8")
+            conn.sendall(store)
+
+
+def getAllSessions():
+    fileRead = open("sessions.json", "r")
+    sessions = json.load(fileRead)
+
+    for session in activeSessions:
+        serializable_data = {
+            'author': session.author.name,
+            'start_time': str(session.start_time),
+            'end_time': str(session.end_time)
+        }
+        sessions[session.id] = serializable_data
+
+    return sessions
 
 if __name__ == "__main__":
-    main()
+    runListener()
