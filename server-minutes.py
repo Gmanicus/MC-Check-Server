@@ -8,7 +8,9 @@ import requests
 import socket
 import json
 from dotenv import load_dotenv
+from faker import Factory
 
+fake = Factory.create()
 load_dotenv()
 
 HOST = '127.0.0.1'  # Standard loopback interface address (localhost)
@@ -18,16 +20,32 @@ CHECK_INTERVAL = 5
 DOWN_DELAY = 60
 
 class User:
-    def __init__(self, name, session):
+    def __init__(self, name, session, color):
         self.name = name
         self.session = session
+        self.color = color
 
 class Session:
     def __init__(self, author, start_time):
         self.id = time.time()
         self.author = author
+        self.color = author.color
         self.start_time = start_time
         self.end_time = None
+
+colors = [
+    '#7DDFD2',
+    '#C141E1',
+    '#1795DE',
+    '#742AB5',
+    '#5C911F',
+    '#E4256B',
+    '#F0C32F',
+    '#25E48A',
+    '#2A82B5',
+    '#07111B',
+    '#C2C6CA'
+]
 
 activeSessions = []
 
@@ -81,9 +99,10 @@ def main():
                         if not found:
                             print("NEW SESSION: " + player.name)
                             # Create session, create user, add user to session, add to arrays
-                            newSession = Session(None, datetime.datetime.now())
-                            newUser = User(player.name, newSession)
-                            newSession.author = newUser
+                            newUser = User(player.name, None, getUserColor())
+                            newSession = Session(newUser, datetime.datetime.now())
+                            newUser.session = newSession
+
 
                             activeSessions.append(newSession)
                             previousUsers.append(newUser)
@@ -118,7 +137,6 @@ def main():
 
 
 def saveSession(session):
-        #if (DEBUG): return
     try:
         fileRead = open("sessions.json", "r")
         store = json.load(fileRead)
@@ -129,12 +147,28 @@ def saveSession(session):
 
         serializable_data = {
             'author': session.author.name,
+            'color': session.color,
             'start_time': str(session.start_time),
             'end_time': str(session.end_time)
         }
 
         store[session.id] = serializable_data
         json.dump(store, file, indent=4)
+
+
+def getUserColor(user):
+    # Try to get user's hex color from sessions
+    # If not found, return a random one
+    try:
+        fileRead = open("sessions.json", "r")
+        store = json.load(fileRead)
+    except Exception as e:
+        return fake.hex_color()
+
+    for session in store:
+        if (store[session]['author'] == user):
+            return store[session]['color']
+    return fake.hex_color()
 
 
 def runListener():
