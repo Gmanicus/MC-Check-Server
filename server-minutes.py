@@ -140,6 +140,7 @@ def saveSession(session):
     try:
         fileRead = open("sessions.json", "r")
         store = json.load(fileRead)
+        fileRead.close()
     except Exception as e:
         store = {}
 
@@ -162,6 +163,7 @@ def getUserColor(user):
     try:
         fileRead = open("sessions.json", "r")
         store = json.load(fileRead)
+        fileRead.close()
     except Exception as e:
         return fake.hex_color()
 
@@ -185,6 +187,7 @@ def runListener():
 def getAllSessions():
     fileRead = open("sessions.json", "r")
     sessions = json.load(fileRead)
+    fileRead.close()
 
     for session in activeSessions:
         serializable_data = {

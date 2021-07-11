@@ -9,21 +9,22 @@ import subprocess
 # import paramiko
 import socket
 from playsound import playsound
-import multiprocessing
+from threading import *
 import os
 from mcstatus import MinecraftServer
 import requests
-from PIL import Image, ImageDraw
 
 from PyQt5 import QtWidgets, QtWebEngineWidgets, QtGui, QtCore
+from PyQt5.QtWidgets import *
 
 import plotly.graph_objects as go
 import pandas as pd
 
 HOST = '127.0.0.1'  # The server's hostname or IP address
 PORT = 10230        # The port used by the server
+CHECK_INTERVAL = 5
 
-class App(QtWidgets.QMainWindow):
+class App(QMainWindow):
 
     def __init__(self):
         super().__init__()
@@ -35,33 +36,65 @@ class App(QtWidgets.QMainWindow):
         
     def initUI(self):
         self.setWindowTitle(self.title)
+        mainBar = self.menuBar()
+        edit = QAction('Settings', self)
+        mainBar.addAction(edit)
+
         #self.setGeometry(self.left, self.top, self.width, self.height)
 
         # move to center screen
         qtRectangle = self.frameGeometry()
-        centerPoint = QtWidgets.QDesktopWidget().availableGeometry().center()
+        centerPoint = QDesktopWidget().availableGeometry().center()
         qtRectangle.moveCenter(centerPoint)
         self.move(qtRectangle.topLeft())
 
-        self.statusBar().showMessage('Message in statusbar.')
+        self.statusBar().showMessage('Loading...')
 
         plotter = self.PlotWidget(self)
 
-        button = QtWidgets.QPushButton('Refresh', self)
+        button = QPushButton('Refresh', self)
         button.setToolTip('This is an example button')
         button.move(50,400)
         #button.clicked.connect(plotter.genFigure())
 
         self.show()
 
-    class PlotWidget(QtWidgets.QWidget):
+        # statusThread = Thread(target=self.updateStatus, args=self)
+        # statusThread.start()
+
+    def updateStatus(self):
+        server = MinecraftServer(loadSetting("MC_SERVER_IP"), loadSetting("SERVER_PORT_NUMBER"))
+        status = None
+        response = True
+        label = "SERVER ONLINE"
+
+        while (True):
+            if (int(time.time() % CHECK_INTERVAL) == 0):
+                try:
+                    status = server.status()
+                    response = True
+                    label = "SERVER ONLINE"
+                except Exception:
+                    try:
+                        requests.get("https://www.google.com/")
+                        if response:
+                            response = False
+                            label = "!" + " SERVER OFFLINE " + "!"
+                    except requests.ConnectionError:
+                        label = "-" + " CONNECTIVITY FAILURE " + "-"
+                        status = None
+
+            self.statusBar().showMessage(label)
+
+    class PlotWidget(QWidget):
         def __init__(self, parent=None):
             super().__init__(parent)
-            self.button = QtWidgets.QPushButton('Plot', self)
-            self.hello = QtWidgets.QPushButton('Hello World', self)
+            self.setGeometry(0,20,0,0)
+            self.button = QPushButton('Plot', self)
+            self.hello = QPushButton('Hello World', self)
             self.browser = QtWebEngineWidgets.QWebEngineView(self)
 
-            vlayout = QtWidgets.QVBoxLayout(self)
+            vlayout = QVBoxLayout(self)
             vlayout.addWidget(self.button, alignment=QtCore.Qt.AlignHCenter)
             vlayout.addWidget(self.hello, alignment=QtCore.Qt.AlignHCenter)
             vlayout.addWidget(self.browser)
@@ -157,6 +190,27 @@ def BytesToJSON(bytes):
     data = bytes.decode('utf-8').replace("'", '"')
     return json.loads(data)
 
+def saveSetting(setting, value):
+    try:
+        fileRead = open("sessions.json", "r")
+        store = json.load(fileRead)
+        fileRead.close()
+    except Exception as e:
+        store = {}
+
+    with open("settings.json", "w") as file:
+        store[setting] = value
+        json.dump(store, file, indent=4)
+
+def loadSetting(setting):
+    try:
+        fileRead = open("settings.json", "r")
+        store = json.load(fileRead)
+        fileRead.close()
+    except Exception as e:
+        return None
+    return store[setting]
+
 
 
 
@@ -165,7 +219,7 @@ if __name__ == '__main__':
     logging.basicConfig(format=format, level=logging.INFO,
                         datefmt="%H:%M:%S")
 
-    app = QtWidgets.QApplication(sys.argv)
+    app = QApplication(sys.argv)
     ex = App()
     sys.exit(app.exec_())
 
