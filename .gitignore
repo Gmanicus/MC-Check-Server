@@ -1,4 +1,10 @@
+__pycache__
 .env
-Plans.rtf
-sessions.json
-settings.json
+*.sh
+*.rtf
+*.json
+*.pdn
+*.spec
+
+dist
+build

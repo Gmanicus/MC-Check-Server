@@ -16,6 +16,7 @@ import requests
 
 from PyQt5 import QtWidgets, QtWebEngineWidgets, QtGui, QtCore
 from PyQt5.QtWidgets import *
+import GenericInputDialog
 
 import plotly.graph_objects as go
 import pandas as pd
@@ -31,16 +32,13 @@ class App(QMainWindow):
         self.title = 'MC Outpost'
         self.left = 1000
         self.top = 100
-        self.setFixedSize(700, 480)
+        self.setFixedSize(700, 420)
         self.initUI()
+
+        self.settingsChanged = False
         
     def initUI(self):
         self.setWindowTitle(self.title)
-        mainBar = self.menuBar()
-        edit = QAction('Settings', self)
-        mainBar.addAction(edit)
-
-        #self.setGeometry(self.left, self.top, self.width, self.height)
 
         # move to center screen
         qtRectangle = self.frameGeometry()
@@ -48,61 +46,110 @@ class App(QMainWindow):
         qtRectangle.moveCenter(centerPoint)
         self.move(qtRectangle.topLeft())
 
+        edit = QAction('Settings', self)
+        edit.triggered.connect(self.settingsUI)
+        mainBar = self.menuBar()
+        mainBar.addAction(edit)
+
+        self.playerLabel = QLabel(self)
+        self.serverLabel = QLabel(self)
+        self.playerLabel.move(20, 350)
+        self.serverLabel.move(20, 370)
+        self.playerLabel.setFixedWidth(660)
+        self.serverLabel.setFixedWidth(660)
+
         self.statusBar().showMessage('Loading...')
 
         plotter = self.PlotWidget(self)
 
-        button = QPushButton('Refresh', self)
-        button.setToolTip('This is an example button')
-        button.move(50,400)
-        #button.clicked.connect(plotter.genFigure())
-
         self.show()
 
-        # statusThread = Thread(target=self.updateStatus, args=self)
-        # statusThread.start()
+        statusThread = Thread(target=self.updateStatus, daemon=True)
+        statusThread.start()
+
+    def settingsUI(self):
+        accepted, values = GenericInputDialog.show_dialog("Settings", [
+            GenericInputDialog.TextLineInput('Server IP', loadSetting("SERVER_IP")),
+            GenericInputDialog.TextLineInput('Server Port', str(loadSetting("SERVER_PORT")))])
+
+        if (accepted):
+            if not isInteger(values['Server Port']): self.errorUI('Port must be a number'); return
+
+            saveSetting('SERVER_IP', values['Server IP'])
+            saveSetting('SERVER_PORT', int(values['Server Port']))
+            self.settingsChanged = True
+
+    def errorUI(self, message):
+        msg = QMessageBox()
+        msg.setWindowTitle("Error")
+        msg.setIcon(QMessageBox.Critical)
+        msg.setText(message)
+        msg.exec_()
 
     def updateStatus(self):
-        server = MinecraftServer(loadSetting("MC_SERVER_IP"), loadSetting("SERVER_PORT_NUMBER"))
+        server = MinecraftServer(loadSetting("SERVER_IP"), loadSetting("SERVER_PORT"))
         status = None
         response = True
-        label = "SERVER ONLINE"
+        label = "Loading..."
+        started = False
 
         while (True):
             if (int(time.time() % CHECK_INTERVAL) == 0):
+                # Reconnect to the server if our settings changed
+                if self.settingsChanged:
+                    started = False
+                    self.statusBar().showMessage('Reconnecting...')
+                    self.settingsChanged = False
+                    server = MinecraftServer(loadSetting("SERVER_IP"), loadSetting("SERVER_PORT"))
+
                 try:
                     status = server.status()
                     response = True
                     label = "SERVER ONLINE"
+                    if not started:
+                        self.statusBar().showMessage('Connected')
+                        started = True
                 except Exception:
                     try:
                         requests.get("https://www.google.com/")
                         if response:
                             response = False
-                            label = "!" + " SERVER OFFLINE " + "!"
+                            started = False
+                            label = "SERVER OFFLINE"
+                            self.statusBar().showMessage('Server Offline')
                     except requests.ConnectionError:
-                        label = "-" + " CONNECTIVITY FAILURE " + "-"
+                        label = "CONNECTIVITY FAILURE"
+                        started = False
                         status = None
+                        self.statusBar().showMessage('Connectivity Failure')
 
-            self.statusBar().showMessage(label)
+                if status:
+                    if status.players.sample:
+                        playerNames = []
+                        for player in status.players.sample:
+                            playerNames.append(player.name)
+                        self.playerLabel.setText("Players Online: " + ", ".join(playerNames))
+                    else:
+                        self.playerLabel.setText("No Players Online")
+
+                    self.serverLabel.setText("Server Latency: {}ms".format(int(status.latency)))
 
     class PlotWidget(QWidget):
         def __init__(self, parent=None):
             super().__init__(parent)
             self.setGeometry(0,20,0,0)
-            self.button = QPushButton('Plot', self)
-            self.hello = QPushButton('Hello World', self)
             self.browser = QtWebEngineWidgets.QWebEngineView(self)
+            self.label = QLabel(self)
 
             vlayout = QVBoxLayout(self)
-            vlayout.addWidget(self.button, alignment=QtCore.Qt.AlignHCenter)
-            vlayout.addWidget(self.hello, alignment=QtCore.Qt.AlignHCenter)
             vlayout.addWidget(self.browser)
+            vlayout.addWidget(self.label, alignment=QtCore.Qt.AlignHCenter)
+
+            self.resize(700,340)
+            self.browser.resize(700,340)
 
             self.genFigure()
 
-            # self.button.clicked.connect(self.genFigure)
-            self.resize(700,340)
 
         def genFigure(self):
             daysAgo = datetime.now() - timedelta(3)
@@ -124,6 +171,14 @@ class App(QMainWindow):
             )
 
             sessions = self.getSessions()
+            if not sessions:
+                self.label.setText("UNABLE TO GET SESSIONS")
+                self.label.adjustSize()
+                return
+            else:
+                self.label.setText("")
+                self.label.adjustSize()
+
             seenAuthors = []
             for s in sessions:
                 timeLabel = "Hours"
@@ -173,17 +228,18 @@ class App(QMainWindow):
             self.browser.setHtml(fig.to_html(include_plotlyjs='cdn'))
     
         def getSessions(self):
-            # with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            #     s.connect((HOST, PORT))
-            #     data = b''
-            #     while True:
-            #         newData = s.recv(1024)
-            #         data += newData
-            #         if not newData:
-            #             break
-            # print("Received: {}".format(BytesToJSON(data)))
-            # return BytesToJSON(data)
-            return json.load(open('sessions.json', 'r'))
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                try:
+                    s.connect((HOST, PORT))
+                except Exception as e:
+                    return None
+                data = b''
+                while True:
+                    newData = s.recv(1024)
+                    data += newData
+                    if not newData:
+                        break
+            return BytesToJSON(data)
 
 
 def BytesToJSON(bytes):
@@ -192,7 +248,7 @@ def BytesToJSON(bytes):
 
 def saveSetting(setting, value):
     try:
-        fileRead = open("sessions.json", "r")
+        fileRead = open("settings.json", "r")
         store = json.load(fileRead)
         fileRead.close()
     except Exception as e:
@@ -211,6 +267,16 @@ def loadSetting(setting):
         return None
     return store[setting]
 
+
+
+
+
+def isInteger(s):
+    try: 
+        int(s)
+        return True
+    except ValueError:
+        return False
 
 
 

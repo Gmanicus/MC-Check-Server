@@ -1,7 +1,7 @@
 import socket
 import time
 import datetime
-import multiprocessing
+from threading import *
 import os
 from mcstatus import MinecraftServer
 import requests
@@ -33,25 +33,17 @@ class Session:
         self.start_time = start_time
         self.end_time = None
 
-colors = [
-    '#7DDFD2',
-    '#C141E1',
-    '#1795DE',
-    '#742AB5',
-    '#5C911F',
-    '#E4256B',
-    '#F0C32F',
-    '#25E48A',
-    '#2A82B5',
-    '#07111B',
-    '#C2C6CA'
-]
-
 activeSessions = []
 
 
 def main():
-    server = MinecraftServer(os.getenv("MC_CHECKSERVER_IP"), 10240)
+    try:
+        int(os.getenv("SERVER_PORT"))
+    except Exception as e:
+        print("ERROR: SERVER PORT NOT INTEGER")
+        return
+        
+    server = MinecraftServer(os.getenv("SERVER_IP"), int(os.getenv("SERVER_PORT")))
     status = None
     ack = False
     response = True
@@ -60,8 +52,11 @@ def main():
     downTime = 0
     previousUsers = []
 
+    listenerThread = Thread(target=runListener, daemon=True)
+    listenerThread.start()
+
     while (True):
-        if (int(time.time() % CHECK_INTERVAL) == 0):
+        if (round(time.time(), 1) % CHECK_INTERVAL) == 0:
             try:
                 status = server.status()
                 response = True
@@ -72,16 +67,15 @@ def main():
                     requests.get("https://www.google.com/")
                     if response:
                         response = False
-                        downTime = time.time()
                         label = "!" + " SYSTEM OFFLINE " + "!"
                 except requests.ConnectionError:
                     label = "-" + " CONNECTIVITY FAILURE " + "-"
                     status = None
 
-        # os.system("cls")
-        # print("{0} | Checking in: {1}s".format(label, int(CHECK_INTERVAL - time.time() % CHECK_INTERVAL)))
+        os.system("cls")
+        print("{0} | Checking in: {1}s".format(label, int(CHECK_INTERVAL - time.time() % CHECK_INTERVAL)))
         if (response and status):
-            # print("\n{0} players online | {1} ms response time".format(status.players.online, status.latency))
+            print("\n{0} players online | {1} ms response time".format(status.players.online, status.latency))
             # GAINED A USER
             if (status.players.online > len(previousUsers)):
 
@@ -99,7 +93,7 @@ def main():
                         if not found:
                             print("NEW SESSION: " + player.name)
                             # Create session, create user, add user to session, add to arrays
-                            newUser = User(player.name, None, getUserColor())
+                            newUser = User(player.name, None, getUserColor(player.name))
                             newSession = Session(newUser, datetime.datetime.now())
                             newUser.session = newSession
 
@@ -130,10 +124,7 @@ def main():
                         previousUsers.remove(user)
                         break
             
-            # if (status.players.sample):
-            #     for player in status.players.sample:
-            #         print("> {}".format(player.name))
-        time.sleep(1)
+        time.sleep(0.99)
 
 
 def saveSession(session):
@@ -157,7 +148,7 @@ def saveSession(session):
         json.dump(store, file, indent=4)
 
 
-def getUserColor(user):
+def getUserColor(username):
     # Try to get user's hex color from sessions
     # If not found, return a random one
     try:
@@ -168,7 +159,7 @@ def getUserColor(user):
         return fake.hex_color()
 
     for session in store:
-        if (store[session]['author'] == user):
+        if (store[session]['author'] == username):
             return store[session]['color']
     return fake.hex_color()
 
@@ -177,11 +168,11 @@ def runListener():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((HOST, PORT))
         s.listen()
-        conn, addr = s.accept()
-        with conn:
-            print('Connected by', addr)
-            store = bytes(str(getAllSessions()), "utf-8")
-            conn.sendall(store)
+        while True:
+            conn, addr = s.accept()
+            with conn:
+                store = bytes(str(getAllSessions()), "utf-8")
+                conn.sendall(store)
 
 
 def getAllSessions():
@@ -200,4 +191,4 @@ def getAllSessions():
     return sessions
 
 if __name__ == "__main__":
-    runListener()
+    main()
