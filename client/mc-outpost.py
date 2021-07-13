@@ -248,19 +248,19 @@ def BytesToJSON(bytes):
 
 def saveSetting(setting, value):
     try:
-        fileRead = open("settings.json", "r")
+        fileRead = open(resource_path("settings.json"), "r")
         store = json.load(fileRead)
         fileRead.close()
     except Exception as e:
         store = {}
 
-    with open("settings.json", "w") as file:
+    with open(resource_path("settings.json"), "w") as file:
         store[setting] = value
         json.dump(store, file, indent=4)
 
 def loadSetting(setting):
     try:
-        fileRead = open("settings.json", "r")
+        fileRead = open(resource_path("settings.json"), "r")
         store = json.load(fileRead)
         fileRead.close()
     except Exception as e:
@@ -277,6 +277,17 @@ def isInteger(s):
         return True
     except ValueError:
         return False
+
+
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
 
 
 
