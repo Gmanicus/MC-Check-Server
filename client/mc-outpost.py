@@ -13,6 +13,7 @@ from threading import *
 import os
 from mcstatus import MinecraftServer
 import requests
+import traceback
 
 from PyQt5 import QtWidgets, QtWebEngineWidgets, QtGui, QtCore
 from PyQt5.QtWidgets import *
@@ -36,9 +37,14 @@ class App(QMainWindow):
         self.initUI()
 
         self.settingsChanged = False
+
+        statusThread = Thread(target=self.updateStatus, daemon=True)
+        statusThread.start()
         
     def initUI(self):
         self.setWindowTitle(self.title)
+
+        self.setWindowIcon(QtGui.QIcon(resource_path("DATA/icon.ico")))
 
         # move to center screen
         qtRectangle = self.frameGeometry()
@@ -60,24 +66,27 @@ class App(QMainWindow):
 
         self.statusBar().showMessage('Loading...')
 
-        plotter = self.PlotWidget(self)
+        self.plotter = self.PlotWidget(self)
 
         self.show()
-
-        statusThread = Thread(target=self.updateStatus, daemon=True)
-        statusThread.start()
 
     def settingsUI(self):
         accepted, values = GenericInputDialog.show_dialog("Settings", [
             GenericInputDialog.TextLineInput('Server IP', loadSetting("SERVER_IP")),
-            GenericInputDialog.TextLineInput('Server Port', str(loadSetting("SERVER_PORT")))])
+            GenericInputDialog.TextLineInput('Server Port', str(loadSetting("SERVER_PORT"))),
+            GenericInputDialog.TextLineInput('Server-Minutes Host IP', loadSetting("SERVER_MINUTES_IP")),
+            GenericInputDialog.TextLineInput('Server-Minutes Port', str(loadSetting("SERVER_MINUTES_PORT")))])
 
         if (accepted):
-            if not isInteger(values['Server Port']): self.errorUI('Port must be a number'); return
+            if not isInteger(values['Server Port']) or not isInteger(values['Server-Minutes Port']):
+                self.errorUI('Port must be a number'); return
 
             saveSetting('SERVER_IP', values['Server IP'])
             saveSetting('SERVER_PORT', int(values['Server Port']))
+            saveSetting('SERVER_MINUTES_IP', values['Server-Minutes Host IP'])
+            saveSetting('SERVER_MINUTES_PORT', int(values['Server-Minutes Port']))
             self.settingsChanged = True
+            self.plotter.genThread.genFigure()
 
     def errorUI(self, message):
         msg = QMessageBox()
@@ -135,111 +144,142 @@ class App(QMainWindow):
                     self.serverLabel.setText("Server Latency: {}ms".format(int(status.latency)))
 
     class PlotWidget(QWidget):
+
         def __init__(self, parent=None):
             super().__init__(parent)
+            self.parent = parent
             self.setGeometry(0,20,0,0)
-            self.browser = QtWebEngineWidgets.QWebEngineView(self)
-            self.label = QLabel(self)
+            self.browser = QtWebEngineWidgets.QWebEngineView()
 
-            vlayout = QVBoxLayout(self)
-            vlayout.addWidget(self.browser)
-            vlayout.addWidget(self.label, alignment=QtCore.Qt.AlignHCenter)
+            self.vlayout = QVBoxLayout(self)
+            self.vlayout.addWidget(self.browser)
 
             self.resize(700,340)
-            self.browser.resize(700,340)
+            self.browser.setFixedSize(680,320)
 
-            self.genFigure()
+            self.genThread = self.GenThread(self)
+            self.genThread.htmlChanged.connect(self.browser.setHtml)
+            self.genThread.labelChanged.connect(self.updateLabel)
+            self.genThread.start()
+
+        def updateLabel(self, text):
+            print("Updating label to: {}".format(repr(text)))
+            self.parent.statusBar().showMessage(text)
+
+        class GenThread(QtCore.QThread):
+            htmlChanged = QtCore.pyqtSignal(str)
+            labelChanged = QtCore.pyqtSignal(str)
+
+            previousSessions = {}
+
+            # Once every 30s, run genFigure
+            def run(self):
+                self.genFigure()
+                while (True):
+                    if (round(time.time(), 1) % 300) == 0:
+                        self.genFigure()
 
 
-        def genFigure(self):
-            daysAgo = datetime.now() - timedelta(3)
+            def genFigure(self):
+                print("Generating figure...")
+                daysAgo = datetime.now() - timedelta(3)
 
-            # dates = []
-            # users = []
+                # dates = []
+                # users = []
 
-            # for x in range(0,6):
-            #     dates.append( str((weekAgo + timedelta(x)).date) )
+                # for x in range(0,6):
+                #     dates.append( str((weekAgo + timedelta(x)).date) )
 
-            fig = go.Figure() # init the figure
+                fig = go.Figure() # init the figure
 
-            fig.update_layout(
-                margin=dict(l=20, r=20, t=30, b=20),
-                xaxis=dict(
-                    range=[str(daysAgo), str(datetime.now())]
-                ),
-                paper_bgcolor="LightSteelBlue",
-            )
+                fig.update_layout(
+                    margin=dict(l=20, r=20, t=30, b=20),
+                    xaxis=dict(
+                        range=[str(daysAgo), str(datetime.now())]
+                    ),
+                    paper_bgcolor="LightSteelBlue",
+                )
+                print("Updated layout...")
 
-            sessions = self.getSessions()
-            if not sessions:
-                self.label.setText("UNABLE TO GET SESSIONS")
-                self.label.adjustSize()
-                return
-            else:
-                self.label.setText("")
-                self.label.adjustSize()
+                sessions = self.getSessions()
+                if not sessions:
+                    self.labelChanged.emit("Unable to Get User Sessions")
+                    return
 
-            seenAuthors = []
-            for s in sessions:
-                timeLabel = "Hours"
-                times = [ sessions[s]['start_time'], sessions[s]['end_time'] ]
-                timeDif = datetime.strptime(times[1], '%Y-%m-%d %H:%M:%S.%f') - datetime.strptime(times[0], '%Y-%m-%d %H:%M:%S.%f')
-
-                timeMarks = []
-                
-                # Add 10:00 PM to 12:00 AM labels to list to be put on hovertext
-                # Remove first letter if it is a leading zero
-                d = datetime.strptime(times[0], "%Y-%m-%d %H:%M:%S.%f")
-                text = d.strftime("%I:%M %p")
-                if (text[0] == "0"): text = text[1:]
-
-                timeMarks.append(text)
-
-                d = datetime.strptime(times[1], "%Y-%m-%d %H:%M:%S.%f")
-                text = d.strftime("%I:%M %p")
-                if (text[0] == "0"): text = text[1:]
-
-                timeMarks.append(text)
-
-                if (timeDif.seconds > 3600):
-                    timeDif = round(timeDif.seconds / 3600, 1)
+                # If we have no new data, do not refresh the plotter
+                if sessions == self.previousSessions:
+                    print("No new session data to plot")
+                    return
                 else:
-                    timeLabel = "Minutes"
-                    timeDif = round(timeDif.seconds / 60, 1)
+                    self.labelChanged.emit("New Session Data Plotted")
+                    self.previousSessions = sessions
 
-                fig.add_trace(go.Scatter(x=times, y=[sessions[s]['author'], sessions[s]['author']],
-                                        marker_color=sessions[s]['color'],
-                                        legendgroup=sessions[s]['author'],
-                                        name=sessions[s]['author'],
-                                        mode='lines',
-                                        hovertemplate='{0}<br>{1} {2}<br>{3} to {4}<extra></extra>'.format(
-                                                                            sessions[s]['author'],
-                                                                            timeDif,
-                                                                            timeLabel,
-                                                                            timeMarks[0],
-                                                                            timeMarks[1]
-                                                                            ),
-                                        orientation='h',
-                                        showlegend=(sessions[s]['author'] not in seenAuthors) # show legend if this is the first time we've seen this author
-                            ))
+                print("Got sessions")
 
-                seenAuthors.append(sessions[s]['author']) # Add author to seen authors
+                seenAuthors = []
+                for s in sessions:
+                    timeLabel = "Hours"
+                    times = [ sessions[s]['start_time'], sessions[s]['end_time'] ]
+                    timeDif = datetime.strptime(times[1], '%Y-%m-%d %H:%M:%S.%f') - datetime.strptime(times[0], '%Y-%m-%d %H:%M:%S.%f')
 
-            self.browser.setHtml(fig.to_html(include_plotlyjs='cdn'))
+                    timeMarks = []
+                    
+                    # Add 10:00 PM to 12:00 AM labels to list to be put on hovertext
+                    # Remove first letter if it is a leading zero
+                    d = datetime.strptime(times[0], "%Y-%m-%d %H:%M:%S.%f")
+                    text = d.strftime("%I:%M %p")
+                    if (text[0] == "0"): text = text[1:]
+
+                    timeMarks.append(text)
+
+                    d = datetime.strptime(times[1], "%Y-%m-%d %H:%M:%S.%f")
+                    text = d.strftime("%I:%M %p")
+                    if (text[0] == "0"): text = text[1:]
+
+                    timeMarks.append(text)
+
+                    if (timeDif.seconds > 3600):
+                        timeDif = round(timeDif.seconds / 3600, 1)
+                    else:
+                        timeLabel = "Minutes"
+                        timeDif = round(timeDif.seconds / 60, 1)
+
+                    fig.add_trace(go.Scatter(x=times, y=[sessions[s]['author'], sessions[s]['author']],
+                                            marker_color=sessions[s]['color'],
+                                            legendgroup=sessions[s]['author'],
+                                            name=sessions[s]['author'],
+                                            mode='lines',
+                                            hovertemplate='{0}<br>{1} {2}<br>{3} to {4}<extra></extra>'.format(
+                                                                                sessions[s]['author'],
+                                                                                timeDif,
+                                                                                timeLabel,
+                                                                                timeMarks[0],
+                                                                                timeMarks[1]
+                                                                                ),
+                                            orientation='h',
+                                            showlegend=(sessions[s]['author'] not in seenAuthors) # show legend if this is the first time we've seen this author
+                                ))
+
+                    seenAuthors.append(sessions[s]['author']) # Add author to seen authors
+
+                html = fig.to_html(include_plotlyjs='cdn')
+                print("Converted to HTML")
+                self.htmlChanged.emit(html)
+                print("Set HTML")
     
-        def getSessions(self):
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                try:
-                    s.connect((HOST, PORT))
-                except Exception as e:
-                    return None
-                data = b''
-                while True:
-                    newData = s.recv(1024)
-                    data += newData
-                    if not newData:
-                        break
-            return BytesToJSON(data)
+            def getSessions(self):
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    try:
+                        s.connect((loadSetting("SERVER_MINUTES_IP"), loadSetting("SERVER_MINUTES_PORT")))
+                    except Exception as e:
+                        return None
+                    data = b''
+                    while True:
+                        newData = s.recv(1024)
+                        data += newData
+                        if not newData:
+                            break
+                return BytesToJSON(data)
 
 
 def BytesToJSON(bytes):
@@ -265,6 +305,10 @@ def loadSetting(setting):
         fileRead.close()
     except Exception as e:
         return None
+    
+    if not setting in store:
+        return None
+
     return store[setting]
 
 
@@ -299,10 +343,3 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     ex = App()
     sys.exit(app.exec_())
-
-    # genFigure()
-
-
-
-# if __name__ == "__main__":
-#     main()
