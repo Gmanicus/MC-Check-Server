@@ -29,7 +29,7 @@ This allows you to view player activity and the server's status on your custom M
   - SERVER_IP: The IP address that your server jar is running on
   - SERVER_PORT: The port number that your server jar is listening to
 - Run `server-minutes.py`
-- Run the MC-Outpost app on any machine via `client/dist/MC-Outpost`. If you only want the application, pull out the MC-Outpost directory and delete everything else.
+- Run the MC-Outpost app on any machine via `client/dist/MC-Outpost`. If you only want the application, pull out the MC-Outpost directory and delete everything else. Or, download the most recent release via the right-hand panel.
 - Set your configuration via the **SETTINGS** button.
   - SERVER IP: The IP address that your server jar is running on
   - SERVER PORT: The port number that your server jar is listening to
