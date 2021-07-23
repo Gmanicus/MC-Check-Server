@@ -20,6 +20,7 @@ This allows you to view player activity and the server's status on your custom M
 ### Prerequisites
 
 - Python 3+ installed on server
+- Client requires Windows 10 to run. May run on Windws 8. Does not work on Windows 7.
 
 ### Instructions
 
